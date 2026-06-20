@@ -1,3 +1,3 @@
 export const startups = [
-  'Citeleaf'
+  'Citeleaf (https://www.citeleaf.vercel.app/)',
 ];

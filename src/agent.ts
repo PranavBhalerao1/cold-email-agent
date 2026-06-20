@@ -12,7 +12,7 @@ async function processStartup(startupName: string): Promise<void> {
   console.log('='.repeat(50));
 
   const { text, steps } = await generateText({
-    model: groq('llama-3.3-70b-versatile'),
+    model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
     tools: { searchWeb, writeEmail, sendEmail },
     maxSteps: 10,
     system: `You are a cold email agent sending outreach emails on behalf of Pranav Bhalerao.

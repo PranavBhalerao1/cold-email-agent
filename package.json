@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^1.0.0",
-    "@tavily/core": "^0.2.0",
+    "@tavily/core": "^0.7.6",
     "ai": "^4.0.0",
     "dotenv": "^16.4.0",
     "nodemailer": "^6.9.0",

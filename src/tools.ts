@@ -45,9 +45,15 @@ export const writeEmail = tool({
 
     const { text } = await generateText({
       model: groq('llama-3.3-70b-versatile'),
-      prompt: `You are writing a cold email on behalf of Pranav Bhalerao. Follow the template below EXACTLY. The only sentence you may change is the one labeled [CUSTOMIZE]. Everything else must stay word-for-word identical.
+      prompt: `You are writing a cold email on behalf of Pranav Bhalerao. You MUST follow the exact format below. The ONLY part you may change is the [CUSTOMIZE] sentence. Every other word, line, and blank line must be reproduced exactly as shown.
 
-TEMPLATE:
+STRICT RULES:
+- The greeting MUST be exactly "Hi ${contactFirstName}," — never "Hi there," or any other variation
+- Paragraphs MUST be separated by a single blank line (\\n\\n between paragraphs)
+- The signature MUST be plain text: "Pranav Bhalerao" on one line, "8482478482" on the next — no markdown, no styling
+- Do NOT add any text before SUBJECT: or after the signature
+
+TEMPLATE (reproduce this exactly, replacing only [CUSTOMIZE] and [COMPANY]):
 ---
 Hi ${contactFirstName},
 
@@ -61,10 +67,19 @@ Pranav Bhalerao
 8482478482
 ---
 
-Output format — return ONLY this, nothing else:
+Output ONLY the following — no other text:
 SUBJECT: Quick note from an incoming Stanford freshman
 BODY:
-<the email body exactly as templated, with [CUSTOMIZE] replaced by your one sentence and [COMPANY] replaced by ${startupName}>`,
+Hi ${contactFirstName},
+
+I'm an incoming freshman at Stanford and a co-first author on an ASR paper (https://arxiv.org/pdf/2601.06972) initially accepted to ACL 2026, now revised for EMNLP 2026. The paper analyzes how architectural inductive bias shapes hierarchical speech feature learning across 24 models (Transformers vs. Conformers), so I've spent serious time thinking about exactly the kinds of problems ${startupName} works on.
+
+[your one [CUSTOMIZE] sentence here]
+
+I'd love to contribute this summer and am happy to work on whatever's most useful to the team, even if there isn't a formal role. Would you be open to a quick call?
+
+Pranav Bhalerao
+8482478482`,
     });
 
     const lines = text.split('\n');
@@ -74,13 +89,14 @@ BODY:
         ?.replace('SUBJECT:', '')
         .trim() ?? `Quick note from an incoming Stanford freshman`;
     const bodyStart = lines.findIndex((l) => l.startsWith('BODY:'));
-    const body =
+    const rawBody =
       bodyStart >= 0
-        ? lines
-            .slice(bodyStart + 1)
-            .join('\n')
-            .trim()
+        ? lines.slice(bodyStart + 1).join('\n').trim()
         : text.trim();
+    const body = rawBody
+      .split('\n')
+      .map((line) => line.trimStart())
+      .join('\n');
 
     return { subject: subjectLine, body, to: contactEmail };
   },
@@ -94,6 +110,15 @@ export const sendEmail = tool({
     body: z.string().describe('Plain-text email body'),
   }),
   execute: async ({ to, subject, body }) => {
+    if (process.env.DRY_RUN === 'true') {
+      console.log('\n[DRY RUN] Would send email:');
+      console.log('To:', to);
+      console.log('Subject:', subject);
+      console.log('Body:\n', body);
+      console.log('Attachment: Pranav_Bhalerao_Resume.pdf');
+      return { success: true, messageId: 'dry-run', dryRun: true };
+    }
+
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {

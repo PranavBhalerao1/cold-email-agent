@@ -1,57 +1,121 @@
 import 'dotenv/config';
 import { generateText } from 'ai';
 import { createGroq } from '@ai-sdk/groq';
-import { startups } from './startups.js';
+import { startups, type Startup } from './startups.js';
 import { searchWeb, sendEmail } from './tools.js';
 
 const groq = createGroq({ apiKey: process.env.GROQ_API_KEY! });
 
 const SUBJECT = 'Quick note from an incoming Stanford freshman';
 
-async function processStartup(startupName: string): Promise<void> {
+async function scrapeUrl(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const html = await res.text();
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000);
+  } catch {
+    return '';
+  }
+}
+
+async function buildContext(startup: Startup): Promise<{ snippet: string; resolvedEmail?: string }> {
+  const parts: string[] = [];
+
+  // Always scrape the startup's own website
+  console.log(`  [scrape] Fetching ${startup.url}...`);
+  const scraped = await scrapeUrl(startup.url);
+  if (scraped) parts.push(`Website (${startup.url}):\n${scraped}`);
+
+  // Only run Tavily search if we still need an email or name
+  const needsSearch = !startup.email || !startup.contactFirstName;
+  if (needsSearch) {
+    console.log('  [search] Running Tavily search...');
+    const results = await searchWeb(`${startup.name} startup contact email careers`);
+    const tavilySnippet = results
+      .map((r) => `${r.title}\n${r.url}\n${r.content.slice(0, 800)}`)
+      .join('\n\n---\n\n')
+      .slice(0, 2000);
+    if (tavilySnippet) parts.push(`Search results:\n${tavilySnippet}`);
+  }
+
+  return { snippet: parts.join('\n\n===\n\n') };
+}
+
+async function processStartup(startup: Startup): Promise<void> {
   console.log(`\n${'='.repeat(50)}`);
-  console.log(`Targeting: ${startupName}`);
+  console.log(`Targeting: ${startup.name}`);
   console.log('='.repeat(50));
 
-  // Step 1: search directly in code
-  console.log('  [search] Fetching web results...');
-  const results = await searchWeb(`${startupName} startup contact email careers`);
-  const snippet = results
-    .map((r) => `${r.title}\n${r.url}\n${r.content.slice(0, 800)}`)
-    .join('\n\n---\n\n')
-    .slice(0, 3000);
+  const hasAllInfo = !!startup.email && !!startup.contactFirstName;
 
-  // Step 2: single LLM call — output JSON only
+  let snippet = '';
+  if (!hasAllInfo) {
+    const ctx = await buildContext(startup);
+    snippet = ctx.snippet;
+  } else {
+    // Still scrape website for context to write a good connecting sentence
+    console.log(`  [scrape] Fetching ${startup.url}...`);
+    const scraped = await scrapeUrl(startup.url);
+    snippet = scraped ? `Website (${startup.url}):\n${scraped}` : '';
+  }
+
+  const emailInstruction = startup.email
+    ? `The recipient email is already known: ${startup.email}. Use this exactly — do not change it.`
+    : `Find the best contact or careers email address for ${startup.name} from the context above. Prioritize emails found directly on the website over search results. You MUST provide a real email — do not leave it blank.`;
+
+  const nameInstruction = startup.contactFirstName
+    ? `The contact's first name is already known: ${startup.contactFirstName}. Use this exactly.`
+    : `Find the contact's first name from the context above. NEVER use "there" as a first name. If no real person's name is found, use the company name (e.g. "Hi ${startup.name},").`;
+
   const { text } = await generateText({
     model: groq('llama-3.3-70b-versatile'),
     prompt: `You are helping send a cold email on behalf of Pranav Bhalerao (incoming Stanford freshman, co-first author on an ASR paper analyzing architectural inductive bias across 24 models, accepted to ACL 2026 / revised for EMNLP 2026).
 
-Search results for "${startupName}":
-${snippet}
+Context for "${startup.name}":
+${snippet || '(no additional context available)'}
 
-From the search results above:
-1. Find the best contact or careers email address for ${startupName}.
-2. Extract the contact's first name (use "there" if unknown).
-3. Identify one specific, concrete thing ${startupName} does that connects to ASR, speech, audio, or AI architecture.
-4. Write the email body following the EXACT template below — the only sentence you may write yourself is [CUSTOMIZE].
+Instructions:
+- ${emailInstruction}
+- ${nameInstruction}
+- Write the email body following the EXACT template below. The ONLY part you write is [CUSTOMIZE] — every other word is locked.
 
-EMAIL TEMPLATE (reproduce exactly, replacing [CUSTOMIZE] and [COMPANY] with ${startupName}):
-Hi [FIRST NAME],
+RULES FOR [CUSTOMIZE]:
+- Write ONE sentence in FIRST PERSON — you ARE Pranav writing this email, not describing him
+- NEVER refer to Pranav in third person (never "Pranav's work", "Pranav appreciates", etc.)
+- Connect something from Pranav's background to something specific and real about what ${startup.name} does
+- Background to draw from: Stanford CS/Math, ASR research (transformers vs conformers across 24 models), YC Startup School 2026, SIG quant finance discovery day, full-stack dev (Next.js, Supabase, Swift)
+- Pick the most relevant angle — do NOT force ASR if it doesn't fit
+- Do NOT start with "I"
+- Do NOT use the word "particularly"
+- Be specific and factual, no hype or filler words
+- NEVER output bracket placeholders in the final email
 
-I'm an incoming freshman at Stanford and a co-first author on an ASR paper (https://arxiv.org/pdf/2601.06972) initially accepted to ACL 2026, now revised for EMNLP 2026. The paper analyzes how architectural inductive bias shapes hierarchical speech feature learning across 24 models (Transformers vs. Conformers), so I've spent serious time thinking about exactly the kinds of problems ${startupName} works on.
+EXAMPLE:
+Good: "My full-stack work with Next.js and Supabase maps directly to the kind of infrastructure ${startup.name} needs to scale its product."
+Bad: "Having developed full-stack applications, Pranav appreciates how ${startup.name} streamlines its core offering."
 
-[CUSTOMIZE: one sentence connecting Pranav's ASR/architecture work to something specific and real about what ${startupName} does. Do not start with "I". Factual and grounded, no hype.]
+EMAIL TEMPLATE — reproduce EXACTLY, only replacing [CUSTOMIZE]:
 
+PARAGRAPH 1 (LOCKED — copy word for word):
+I'm an incoming freshman at Stanford and a co-first author on an ASR paper (https://arxiv.org/pdf/2601.06972) initially accepted to ACL 2026, now revised for EMNLP 2026. The paper analyzes how architectural inductive bias shapes hierarchical speech feature learning across 24 models (Transformers vs. Conformers), so I've spent serious time thinking about exactly the kinds of problems ${startup.name} works on.
+
+PARAGRAPH 2 (ONE sentence only, first person, you write this):
+[CUSTOMIZE]
+
+PARAGRAPH 3 (LOCKED — copy word for word):
 I'd love to contribute this summer and am happy to work on whatever's most useful to the team, even if there isn't a formal role. Would you be open to a quick call?
 
+SIGNATURE (LOCKED):
 Pranav Bhalerao
 8482478482
 
+The final emailBody must be:
+Hi [FIRST NAME],\n\n[PARAGRAPH 1]\n\n[CUSTOMIZE sentence]\n\n[PARAGRAPH 3]\n\nPranav Bhalerao\n8482478482
+
 OUTPUT: Return ONLY valid JSON, no markdown, no explanation:
-{"to":"<email>","contactFirstName":"<first name>","emailBody":"<full email body with paragraphs separated by \\n\\n>"}`,
+{"to":"<email>","contactFirstName":"<first name or company name>","emailBody":"<full email body with paragraphs separated by \\n\\n>"}`,
   });
 
-  // Step 3: parse JSON and send directly in code
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     console.error('  [error] LLM did not return valid JSON:', text);
@@ -77,13 +141,13 @@ OUTPUT: Return ONLY valid JSON, no markdown, no explanation:
 
 async function main(): Promise<void> {
   console.log(`${process.env.DRY_RUN === 'true' ? '[DRY RUN] ' : ''}Cold Email Agent starting...`);
-  console.log(`Targeting ${startups.length} startups: ${startups.join(', ')}\n`);
+  console.log(`Targeting ${startups.length} startups: ${startups.map((s) => s.name).join(', ')}\n`);
 
   for (const startup of startups) {
     try {
       await processStartup(startup);
     } catch (err) {
-      console.error(`Error processing ${startup}:`, err);
+      console.error(`Error processing ${startup.name}:`, err);
     }
   }
 

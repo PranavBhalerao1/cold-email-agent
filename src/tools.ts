@@ -45,11 +45,23 @@ export async function sendEmail({
     'resume.pdf'
   );
 
+  const paragraphs = body.split('\n\n');
+  const signatureLines = ['Pranav Bhalerao', '8482478482'];
+  const htmlParagraphs = paragraphs.map((para) => {
+    const isSignature = signatureLines.some((line) => para.trim().startsWith(line));
+    const inner = para.replace(/\n/g, '<br>');
+    return isSignature
+      ? `<p style="color: #000000;">${inner}</p>`
+      : `<p>${inner}</p>`;
+  });
+  const html = `<div style="font-family: Arial, sans-serif; color: #000000; font-size: 14px;">${htmlParagraphs.join('')}</div>`;
+
   const info = await transporter.sendMail({
     from: `Pranav Bhalerao <${process.env.GMAIL_USER}>`,
     to,
     subject,
     text: body,
+    html,
     attachments: [
       {
         filename: 'Pranav_Bhalerao_Resume.pdf',

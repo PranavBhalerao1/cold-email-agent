@@ -1,4 +1,4 @@
-Name: Pranav Bhalerao
-Email: pranavrbhalerao@gmail.com
-Phone: 8482478482
-Background: Incoming Stanford freshman (Math + CS), co-first author on ASR paper analyzing architectural inductive bias across 24 models (Transformers vs Conformers), accepted ACL 2026 revised for EMNLP 2026, paper: https://arxiv.org/pdf/2601.06972, YC Startup School 2026, SIG High School Discovery Day (quant finance), full-stack dev (Next.js, Supabase, Swift)
+Name: [YOUR_NAME]
+Email: [YOUR_EMAIL]
+Phone: [YOUR_PHONE]
+Background: [YOUR_BACKGROUND — e.g. school, research experience, relevant skills, GitHub/portfolio links]

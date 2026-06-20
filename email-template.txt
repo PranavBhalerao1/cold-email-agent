@@ -1,13 +1,13 @@
-SUBJECT: Stanford Frosh — Internship Interest
+SUBJECT: [YOUR_SUBJECT_LINE]
 
 BODY:
 Hi [FIRST_NAME],
 
-I'm an incoming freshman at Stanford and a co-first author on an ASR paper (https://arxiv.org/pdf/2601.06972) initially accepted to ACL 2026, now revised for EMNLP 2026. The paper analyzes how architectural inductive bias shapes hierarchical speech feature learning across 24 models (Transformers vs. Conformers), so I've spent serious time thinking about exactly the kinds of problems [COMPANY] works on.
+[OPENING — introduce yourself and your most relevant credential]
 
 [CUSTOMIZE]
 
-I'd love to contribute this summer and am happy to work on whatever's most useful to the team, even if there isn't a formal role. Would you be open to a quick call?
+[CLOSING — e.g. "I'd love to contribute this summer..."]
 
 [NAME]
 [PHONE]

@@ -1,4 +1,8 @@
 import 'dotenv/config';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { generateText } from 'ai';
 import { createGroq } from '@ai-sdk/groq';
 import { startups, type Startup } from './startups.js';
@@ -6,7 +10,15 @@ import { searchWeb, sendEmail } from './tools.js';
 
 const groq = createGroq({ apiKey: process.env.GROQ_API_KEY! });
 
-const SUBJECT = 'Quick note from an incoming Stanford freshman';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const profile = readFileSync(resolve(root, 'profile.txt'), 'utf-8').trim();
+const emailTemplate = readFileSync(resolve(root, 'email-template.txt'), 'utf-8').trim();
+
+const subjectMatch = emailTemplate.match(/^SUBJECT:\s*(.+)$/m);
+const SUBJECT = subjectMatch ? subjectMatch[1].trim() : 'Quick note';
+
+const bodyMatch = emailTemplate.match(/^BODY:\s*\n([\s\S]+)$/m);
+const BODY_TEMPLATE = bodyMatch ? bodyMatch[1].trim() : emailTemplate;
 
 async function scrapeUrl(url: string): Promise<string> {
   try {
@@ -18,15 +30,13 @@ async function scrapeUrl(url: string): Promise<string> {
   }
 }
 
-async function buildContext(startup: Startup): Promise<{ snippet: string; resolvedEmail?: string }> {
+async function buildContext(startup: Startup): Promise<string> {
   const parts: string[] = [];
 
-  // Always scrape the startup's own website
   console.log(`  [scrape] Fetching ${startup.url}...`);
   const scraped = await scrapeUrl(startup.url);
   if (scraped) parts.push(`Website (${startup.url}):\n${scraped}`);
 
-  // Only run Tavily search if we still need an email or name
   const needsSearch = !startup.email || !startup.contactFirstName;
   if (needsSearch) {
     console.log('  [search] Running Tavily search...');
@@ -38,7 +48,7 @@ async function buildContext(startup: Startup): Promise<{ snippet: string; resolv
     if (tavilySnippet) parts.push(`Search results:\n${tavilySnippet}`);
   }
 
-  return { snippet: parts.join('\n\n===\n\n') };
+  return parts.join('\n\n===\n\n');
 }
 
 async function processStartup(startup: Startup): Promise<void> {
@@ -46,18 +56,7 @@ async function processStartup(startup: Startup): Promise<void> {
   console.log(`Targeting: ${startup.name}`);
   console.log('='.repeat(50));
 
-  const hasAllInfo = !!startup.email && !!startup.contactFirstName;
-
-  let snippet = '';
-  if (!hasAllInfo) {
-    const ctx = await buildContext(startup);
-    snippet = ctx.snippet;
-  } else {
-    // Still scrape website for context to write a good connecting sentence
-    console.log(`  [scrape] Fetching ${startup.url}...`);
-    const scraped = await scrapeUrl(startup.url);
-    snippet = scraped ? `Website (${startup.url}):\n${scraped}` : '';
-  }
+  const snippet = await buildContext(startup);
 
   const emailInstruction = startup.email
     ? `The recipient email is already known: ${startup.email}. Use this exactly — do not change it.`
@@ -69,7 +68,10 @@ async function processStartup(startup: Startup): Promise<void> {
 
   const { text } = await generateText({
     model: groq('llama-3.3-70b-versatile'),
-    prompt: `You are helping send a cold email on behalf of Pranav Bhalerao (incoming Stanford freshman, co-first author on an ASR paper analyzing architectural inductive bias across 24 models, accepted to ACL 2026 / revised for EMNLP 2026).
+    prompt: `You are helping send a cold email on behalf of the sender described below.
+
+Sender profile:
+${profile}
 
 Context for "${startup.name}":
 ${snippet || '(no additional context available)'}
@@ -80,11 +82,10 @@ Instructions:
 - Write the email body following the EXACT template below. The ONLY part you write is [CUSTOMIZE] — every other word is locked.
 
 RULES FOR [CUSTOMIZE]:
-- Write ONE sentence in FIRST PERSON — you ARE Pranav writing this email, not describing him
-- NEVER refer to Pranav in third person (never "Pranav's work", "Pranav appreciates", etc.)
-- Connect something from Pranav's background to something specific and real about what ${startup.name} does
-- Background to draw from: Stanford CS/Math, ASR research (transformers vs conformers across 24 models), YC Startup School 2026, SIG quant finance discovery day, full-stack dev (Next.js, Supabase, Swift)
-- Pick the most relevant angle — do NOT force ASR if it doesn't fit
+- Write ONE sentence in FIRST PERSON — you ARE the sender writing this email, not describing them
+- NEVER refer to the sender in third person
+- Connect something from the sender's background to something specific and real about what ${startup.name} does
+- Pick the most relevant angle from the profile — do NOT force the ASR angle if it doesn't fit
 - Do NOT start with "I"
 - Do NOT use the word "particularly"
 - Be specific and factual, no hype or filler words
@@ -92,28 +93,36 @@ RULES FOR [CUSTOMIZE]:
 
 EXAMPLE:
 Good: "My full-stack work with Next.js and Supabase maps directly to the kind of infrastructure ${startup.name} needs to scale its product."
-Bad: "Having developed full-stack applications, Pranav appreciates how ${startup.name} streamlines its core offering."
+Bad: "Having developed full-stack applications, the sender appreciates how ${startup.name} streamlines its core offering."
 
-EMAIL TEMPLATE — reproduce EXACTLY, only replacing [CUSTOMIZE]:
+EMAIL TEMPLATE — reproduce EXACTLY, only replacing [CUSTOMIZE], [FIRST_NAME], [COMPANY], [NAME], and [PHONE]:
 
-PARAGRAPH 1 (LOCKED — copy word for word):
-I'm an incoming freshman at Stanford and a co-first author on an ASR paper (https://arxiv.org/pdf/2601.06972) initially accepted to ACL 2026, now revised for EMNLP 2026. The paper analyzes how architectural inductive bias shapes hierarchical speech feature learning across 24 models (Transformers vs. Conformers), so I've spent serious time thinking about exactly the kinds of problems ${startup.name} works on.
+${BODY_TEMPLATE}
+
+Where:
+- [FIRST_NAME] = the contact's first name (or company name if unknown)
+- [COMPANY] = ${startup.name}
+- [CUSTOMIZE] = your one first-person connecting sentence
+- [NAME] = the sender's name from the profile
+- [PHONE] = the sender's phone from the profile
+
+PARAGRAPH 1 (LOCKED — copy word for word, only replace [COMPANY]):
+The paragraph starting with "I'm an incoming freshman..."
 
 PARAGRAPH 2 (ONE sentence only, first person, you write this):
 [CUSTOMIZE]
 
 PARAGRAPH 3 (LOCKED — copy word for word):
-I'd love to contribute this summer and am happy to work on whatever's most useful to the team, even if there isn't a formal role. Would you be open to a quick call?
+The paragraph starting with "I'd love to contribute..."
 
-SIGNATURE (LOCKED):
-Pranav Bhalerao
-8482478482
+SIGNATURE (LOCKED — use [NAME] and [PHONE] from profile):
+[NAME]
+[PHONE]
 
-The final emailBody must be:
-Hi [FIRST NAME],\n\n[PARAGRAPH 1]\n\n[CUSTOMIZE sentence]\n\n[PARAGRAPH 3]\n\nPranav Bhalerao\n8482478482
+The final emailBody must have paragraphs separated by \\n\\n and no leading whitespace on any line.
 
 OUTPUT: Return ONLY valid JSON, no markdown, no explanation:
-{"to":"<email>","contactFirstName":"<first name or company name>","emailBody":"<full email body with paragraphs separated by \\n\\n>"}`,
+{"to":"<email>","contactFirstName":"<first name or company name>","emailBody":"<full email body>"}`,
   });
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
